@@ -1,0 +1,48 @@
+# define a default docker image for all jobs
+image: node:10.12
+
+variables:
+    # replace this with YOUR custom bucket name
+    S3_BUCKET: ******
+    AWS_DEFAULT_REGION: ******
+
+stages:
+    - build_and_test   # build and test
+    - package # upload source code to S3
+    - deploy  # stage for deploying to production
+
+buildAndTest:
+    stage: build_and_test
+    image: openjdk:8-alpine
+    script:
+        - ./gradlew clean test shadowJar --info
+    # artifacts describe the result of the stage
+    # that can be used in consecutive stages
+    artifacts:
+        untracked: true
+
+packageApp:
+    stage: package
+    image: tarekbecker/awscli
+    # use the artifcats of the 'buildAndTest' job
+    dependencies:
+        - buildAndTest
+    script:
+        # package uploads the source code to S3 and creates a new
+        # template file with a reference to the code in S3
+        - aws cloudformation package --template template.yml --s3-bucket $S3_BUCKET --output-template template-export.yml
+    artifacts:
+        paths:
+            # the modified template is the result of this stage
+            - ./template-export.yml
+
+
+deployProd:
+    stage: deploy
+    image: tarekbecker/awscli
+    dependencies:
+        - packageApp
+    script:
+        # use the template-export file to deploy the stack
+        # the cloud formation stack name is prod for our stack
+        - aws cloudformation deploy --template-file template-export.yml --stack-name demo-pipeline-java-prod-stack --capabilities CAPABILITY_IAM
